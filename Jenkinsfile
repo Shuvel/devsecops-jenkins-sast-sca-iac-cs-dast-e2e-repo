@@ -2,15 +2,14 @@ pipeline {
   agent any
 
   environment {
-    // Make sure Jenkins can see Docker CLI on macOS
-    PATH = "/Applications/Docker.app/Contents/Resources/bin:/opt/homebrew/bin:${env.PATH}"
-    // If you’re on Apple Silicon but building x86 images, set default platform
+    // Helpful on Apple Silicon when building x86 images; remove if you want native arm64
     DOCKER_DEFAULT_PLATFORM = "linux/amd64"
+    // Keep PATH clean here; we’ll append Docker paths right where we need them
   }
 
   tools {
-    maven 'Maven_3_8_7'   // ensure this name exists in Global Tool Config
-    // If you pinned a JDK in Jenkins, you can add: jdk 'JDK11'
+    maven 'Maven_3_8_7'
+    // jdk 'JDK11' // optional: pin JDK if you’ve configured it
   }
 
   stages {
@@ -29,44 +28,47 @@ pipeline {
 
     stage('Check Docker') {
       steps {
-        sh '''
-          echo "PATH=$PATH"
-          command -v docker
-          docker version
-          docker info
-        '''
-      }
-    }
-
-stage('Build') {
-  steps {
-    script {
-      // Make sure the docker CLI is on PATH right here
-      withEnv(['PATH+DOCKER=/Applications/Docker.app/Contents/Resources/bin:/opt/homebrew/bin']) {
-        sh 'docker version'  // quick sanity check in this stage
-
-        withDockerRegistry([credentialsId: "dockerlogin", url: ""]) {
-          app = docker.build("asecurityguru/testeb", ".")
+        // Verify CLI + daemon before we try to login/build
+        withEnv(['PATH+DOCKER=/Applications/Docker.app/Contents/Resources/bin:/opt/homebrew/bin:/usr/local/bin']) {
+          sh '''
+            echo "PATH=$PATH"
+            command -v docker
+            docker version
+            docker info
+          '''
         }
       }
     }
-  }
-}
 
-stage('RunContainerScan') {
-  steps {
-    withEnv(['PATH+DOCKER=/Applications/Docker.app/Contents/Resources/bin:/opt/homebrew/bin']) {
-      withCredentials([string(credentialsId: 'SNYK_TOKEN', variable: 'SNYK_TOKEN')]) {
-        sh '''
-          export SNYK_TOKEN="$SNYK_TOKEN"
-          docker images | head -n 5
-          snyk container test asecurityguru/testeb || true
-        '''
+    stage('Build') {
+      steps {
+        script {
+          // Ensure docker is on PATH exactly where withDockerRegistry runs
+          withEnv(['PATH+DOCKER=/Applications/Docker.app/Contents/Resources/bin:/opt/homebrew/bin:/usr/local/bin']) {
+            sh 'docker version' // quick sanity check in this stage
+            withDockerRegistry([credentialsId: "dockerlogin", url: ""]) {
+              // Build from workspace root; DOCKER_DEFAULT_PLATFORM controls arch
+              app = docker.build("asecurityguru/testeb", ".")
+            }
+          }
+        }
       }
     }
-  }
-}
 
+    stage('RunContainerScan') {
+      steps {
+        // Snyk uses the docker CLI to inspect the local image; keep docker on PATH here too
+        withEnv(['PATH+DOCKER=/Applications/Docker.app/Contents/Resources/bin:/opt/homebrew/bin:/usr/local/bin']) {
+          withCredentials([string(credentialsId: 'SNYK_TOKEN', variable: 'SNYK_TOKEN')]) {
+            sh '''
+              export SNYK_TOKEN="$SNYK_TOKEN"
+              docker images | head -n 5
+              snyk container test asecurityguru/testeb || true
+            '''
+          }
+        }
+      }
+    }
 
     stage('RunSnykSCA') {
       steps {
@@ -94,6 +96,7 @@ stage('RunContainerScan') {
     stage('checkov') {
       steps {
         sh '''
+          # Ensure checkov is installed (e.g., pipx install checkov)
           checkov -s -f main.tf
         '''
       }
@@ -102,7 +105,7 @@ stage('RunContainerScan') {
 
   post {
     always {
-      // Grab ZAP report if it exists
+      // Archive ZAP report if present
       sh 'test -f /tmp/zap-output.html && echo "ZAP report found" || true'
       archiveArtifacts artifacts: '/tmp/zap-output.html', allowEmptyArchive: true
     }
