@@ -136,7 +136,6 @@
   <artifactId>maven-compiler-plugin</artifactId>
   <version>3.11.0</version>
   <configuration>
-    <!-- IMPORTANT: do NOT use <release> with --add-exports -->
     <source>11</source>
     <target>11</target>
     <fork>true</fork>
@@ -146,6 +145,7 @@
     </compilerArgs>
   </configuration>
 </plugin>
+
 
 
     <!-- Enforcer -->
