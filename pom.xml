@@ -132,14 +132,18 @@
 
     <!-- Compiler -->
     <plugin>
-      <groupId>org.apache.maven.plugins</groupId>
-      <artifactId>maven-compiler-plugin</artifactId>
-      <version>3.11.0</version>
-      <configuration>
-        <!-- Pick one JDK level that matches your Jenkins JDK -->
-        <release>11</release>
-      </configuration>
-    </plugin>
+  <groupId>org.apache.maven.plugins</groupId>
+  <artifactId>maven-compiler-plugin</artifactId>
+  <version>3.11.0</version>
+  <configuration>
+    <release>11</release>
+    <compilerArgs>
+      <arg>--add-exports</arg><arg>java.base/sun.reflect.generics.reflectiveObjects=ALL-UNNAMED</arg>
+      <arg>--add-exports</arg><arg>java.base/sun.misc=ALL-UNNAMED</arg>
+    </compilerArgs>
+  </configuration>
+</plugin>
+
 
     <!-- Enforcer -->
     <plugin>
