@@ -38,28 +38,35 @@ pipeline {
       }
     }
 
-    stage('Build') {
-      steps {
-        script {
-          // Login if you have DockerHub creds configured
-          withDockerRegistry([credentialsId: "dockerlogin", url: ""]) {
-            // Build from workspace root; DOCKER_DEFAULT_PLATFORM controls arch
-            app = docker.build("asecurityguru/testeb", ".")
-          }
-        }
-      }
-    }
+stage('Build') {
+  steps {
+    script {
+      // Make sure the docker CLI is on PATH right here
+      withEnv(['PATH+DOCKER=/Applications/Docker.app/Contents/Resources/bin:/opt/homebrew/bin']) {
+        sh 'docker version'  // quick sanity check in this stage
 
-    stage('RunContainerScan') {
-      steps {
-        withCredentials([string(credentialsId: 'SNYK_TOKEN', variable: 'SNYK_TOKEN')]) {
-          sh '''
-            export SNYK_TOKEN="$SNYK_TOKEN"
-            snyk container test asecurityguru/testeb || true
-          '''
+        withDockerRegistry([credentialsId: "dockerlogin", url: ""]) {
+          app = docker.build("asecurityguru/testeb", ".")
         }
       }
     }
+  }
+}
+
+stage('RunContainerScan') {
+  steps {
+    withEnv(['PATH+DOCKER=/Applications/Docker.app/Contents/Resources/bin:/opt/homebrew/bin']) {
+      withCredentials([string(credentialsId: 'SNYK_TOKEN', variable: 'SNYK_TOKEN')]) {
+        sh '''
+          export SNYK_TOKEN="$SNYK_TOKEN"
+          docker images | head -n 5
+          snyk container test asecurityguru/testeb || true
+        '''
+      }
+    }
+  }
+}
+
 
     stage('RunSnykSCA') {
       steps {
