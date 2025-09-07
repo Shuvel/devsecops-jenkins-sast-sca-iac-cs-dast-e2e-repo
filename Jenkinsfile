@@ -2,16 +2,16 @@ pipeline {
   agent any
 
   environment {
-    // Make docker + system tools visible to ALL steps (including plugin cleanups)
+    // Make docker + system tools visible to ALL steps
     PATH = "/opt/homebrew/bin:/usr/local/bin:/bin:/usr/bin:${env.PATH}"
-    // Keep this if you need x86 images on Apple Silicon; remove for native arm64 builds
+    // Keep if you need x86 images on Apple Silicon; remove for native arm64
     DOCKER_DEFAULT_PLATFORM = "linux/amd64"
     IMAGE = "asecurityguru/testeb"
   }
 
   tools {
     maven 'Maven_3_8_7'
-    // jdk 'JDK11' // optional if you have a pinned JDK in Jenkins
+    // jdk 'JDK11' // optional if pinned in Jenkins
   }
 
   stages {
@@ -50,6 +50,7 @@ pipeline {
             set -euo pipefail
             echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
             docker version
+            # Build image (DOCKER_DEFAULT_PLATFORM controls arch)
             docker build -t "$IMAGE" .
             # docker push "$IMAGE"   # uncomment when you want to push
             docker logout || true
@@ -87,11 +88,15 @@ pipeline {
       steps {
         sh '''
           set -e
-          "/Users/jrschavel/Documents/GitHub/Tools/ZAP_2.16.1/zap.sh" \
-            -port 9393 -cmd \
-            -quickurl https://www.example.com \
-            -quickprogress \
-            -quickout /tmp/zap-output.html
+          if [ -x "/Users/jrschavel/Documents/GitHub/Tools/ZAP_2.16.1/zap.sh" ]; then
+            "/Users/jrschavel/Documents/GitHub/Tools/ZAP_2.16.1/zap.sh" \
+              -port 9393 -cmd \
+              -quickurl https://www.example.com \
+              -quickprogress \
+              -quickout /tmp/zap-output.html
+          else
+            echo "ZAP not found at given path; skipping DAST"
+          fi
         '''
       }
     }
@@ -99,9 +104,15 @@ pipeline {
     stage('checkov') {
       steps {
         sh '''
-          set -e
-          # Ensure checkov is installed (e.g., pipx install checkov)
-          checkov -s -f main.tf
+          set -euo pipefail
+          if command -v checkov >/dev/null 2>&1; then
+            echo "Running local Checkov"
+            checkov -s -f main.tf
+          else
+            echo "Checkov CLI not found; using Docker image"
+            test -n "$(command -v docker)" || { echo "docker not found"; exit 1; }
+            docker run --rm -v "$PWD":/src bridgecrew/checkov -s -f /src/main.tf
+          fi
         '''
       }
     }
