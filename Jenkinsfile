@@ -1,8 +1,16 @@
 pipeline {
   agent any
 
+  environment {
+    // Make sure Jenkins can see Docker CLI on macOS
+    PATH = "/Applications/Docker.app/Contents/Resources/bin:/opt/homebrew/bin:${env.PATH}"
+    // If you’re on Apple Silicon but building x86 images, set default platform
+    DOCKER_DEFAULT_PLATFORM = "linux/amd64"
+  }
+
   tools {
-    maven 'Maven_3_8_7'   // ensure this tool name exists in Global Tool Config
+    maven 'Maven_3_8_7'   // ensure this name exists in Global Tool Config
+    // If you pinned a JDK in Jenkins, you can add: jdk 'JDK11'
   }
 
   stages {
@@ -19,12 +27,24 @@ pipeline {
       }
     }
 
+    stage('Check Docker') {
+      steps {
+        sh '''
+          echo "PATH=$PATH"
+          command -v docker
+          docker version
+          docker info
+        '''
+      }
+    }
+
     stage('Build') {
       steps {
         script {
-          // If you’ve configured DockerHub creds in Jenkins, keep this as-is
+          // Login if you have DockerHub creds configured
           withDockerRegistry([credentialsId: "dockerlogin", url: ""]) {
-            app = docker.build("asecurityguru/testeb")
+            // Build from workspace root; DOCKER_DEFAULT_PLATFORM controls arch
+            app = docker.build("asecurityguru/testeb", ".")
           }
         }
       }
@@ -34,9 +54,7 @@ pipeline {
       steps {
         withCredentials([string(credentialsId: 'SNYK_TOKEN', variable: 'SNYK_TOKEN')]) {
           sh '''
-            # Snyk respects SNYK_TOKEN env; no need to print it
             export SNYK_TOKEN="$SNYK_TOKEN"
-            # Optional: snyk auth "$SNYK_TOKEN"
             snyk container test asecurityguru/testeb || true
           '''
         }
@@ -57,7 +75,6 @@ pipeline {
     stage('RunDASTUsingZAP') {
       steps {
         sh '''
-          # Adjust the ZAP path if installed elsewhere
           "/Users/jrschavel/Documents/GitHub/Tools/ZAP_2.16.1/zap.sh" \
             -port 9393 -cmd \
             -quickurl https://www.example.com \
@@ -70,11 +87,17 @@ pipeline {
     stage('checkov') {
       steps {
         sh '''
-          # Ensure checkov is installed (e.g., pipx install checkov)
           checkov -s -f main.tf
         '''
       }
     }
   }
-}
 
+  post {
+    always {
+      // Grab ZAP report if it exists
+      sh 'test -f /tmp/zap-output.html && echo "ZAP report found" || true'
+      archiveArtifacts artifacts: '/tmp/zap-output.html', allowEmptyArchive: true
+    }
+  }
+}
