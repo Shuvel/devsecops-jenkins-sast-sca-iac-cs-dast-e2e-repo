@@ -2,14 +2,20 @@ pipeline {
   agent any
 
   environment {
-    // Helpful on Apple Silicon when building x86 images; remove if you want native arm64
+    // Make docker visible to all steps, including plugin login/logout
+    PATH = "/opt/homebrew/bin:/usr/local/bin:${env.PATH}"
+    // If you need x86 images on Apple Silicon, keep this:
     DOCKER_DEFAULT_PLATFORM = "linux/amd64"
   }
 
   tools {
     maven 'Maven_3_8_7'
-    // jdk 'JDK11' // optional: pin JDK if you’ve configured it
+    // jdk 'JDK11' // optional
   }
+
+  // ...rest of your stages unchanged...
+}
+
 
   stages {
     stage('CompileandRunSonarAnalysis') {
