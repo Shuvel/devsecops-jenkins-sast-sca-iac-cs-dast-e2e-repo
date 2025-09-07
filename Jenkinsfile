@@ -2,20 +2,16 @@ pipeline {
   agent any
 
   environment {
-    // Make docker visible to all steps, including plugin login/logout
+    // Make docker visible to all steps (including plugin login/logout cleanup)
     PATH = "/opt/homebrew/bin:/usr/local/bin:${env.PATH}"
-    // If you need x86 images on Apple Silicon, keep this:
+    // On Apple Silicon, keep this if you build x86 images; remove for native arm64
     DOCKER_DEFAULT_PLATFORM = "linux/amd64"
   }
 
   tools {
     maven 'Maven_3_8_7'
-    // jdk 'JDK11' // optional
+    // jdk 'JDK11' // optional if you pinned a JDK in Jenkins
   }
-
-  // ...rest of your stages unchanged...
-}
-
 
   stages {
     stage('CompileandRunSonarAnalysis') {
@@ -33,28 +29,22 @@ pipeline {
 
     stage('Check Docker') {
       steps {
-        // Ensure Jenkins sees Docker from /opt/homebrew/bin
-        withEnv(['PATH+DOCKER=/opt/homebrew/bin']) {
-          sh '''
-            echo "PATH=$PATH"
-            command -v docker || true
-            /opt/homebrew/bin/docker version
-            /opt/homebrew/bin/docker info
-          '''
-        }
+        sh '''
+          echo "PATH=$PATH"
+          command -v docker
+          docker version
+          docker info
+        '''
       }
     }
 
     stage('Build') {
       steps {
         script {
-          // Append only /opt/homebrew/bin so the plugin finds docker
-          withEnv(['PATH+DOCKER=/opt/homebrew/bin']) {
-            sh '/opt/homebrew/bin/docker version' // quick sanity check in this stage
-            withDockerRegistry([credentialsId: "dockerlogin", url: ""]) {
-              // Build from workspace root; DOCKER_DEFAULT_PLATFORM controls arch
-              app = docker.build("asecurityguru/testeb", ".")
-            }
+          withDockerRegistry([credentialsId: "dockerlogin", url: ""]) {
+            sh 'docker version' // sanity check
+            // Build from workspace root; DOCKER_DEFAULT_PLATFORM controls arch
+            app = docker.build("asecurityguru/testeb", ".")
           }
         }
       }
@@ -62,15 +52,12 @@ pipeline {
 
     stage('RunContainerScan') {
       steps {
-        // Snyk uses the docker CLI to inspect the local image
-        withEnv(['PATH+DOCKER=/opt/homebrew/bin']) {
-          withCredentials([string(credentialsId: 'SNYK_TOKEN', variable: 'SNYK_TOKEN')]) {
-            sh '''
-              export SNYK_TOKEN="$SNYK_TOKEN"
-              /opt/homebrew/bin/docker images | head -n 5
-              snyk container test asecurityguru/testeb || true
-            '''
-          }
+        withCredentials([string(credentialsId: 'SNYK_TOKEN', variable: 'SNYK_TOKEN')]) {
+          sh '''
+            export SNYK_TOKEN="$SNYK_TOKEN"
+            docker images | head -n 5
+            snyk container test asecurityguru/testeb || true
+          '''
         }
       }
     }
