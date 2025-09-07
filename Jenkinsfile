@@ -2,22 +2,38 @@ pipeline {
   agent any
 
   environment {
-    // Make docker visible to all steps (including plugin login/logout cleanup)
-    PATH = "/opt/homebrew/bin:/usr/local/bin:${env.PATH}"
-    // On Apple Silicon, keep this if you build x86 images; remove for native arm64
+    // Make docker + system tools visible to ALL steps (including plugin cleanups)
+    PATH = "/opt/homebrew/bin:/usr/local/bin:/bin:/usr/bin:${env.PATH}"
+    // Keep this if you need x86 images on Apple Silicon; remove for native arm64 builds
     DOCKER_DEFAULT_PLATFORM = "linux/amd64"
+    IMAGE = "asecurityguru/testeb"
   }
 
   tools {
     maven 'Maven_3_8_7'
-    // jdk 'JDK11' // optional if you pinned a JDK in Jenkins
+    // jdk 'JDK11' // optional if you have a pinned JDK in Jenkins
   }
 
   stages {
+
+    stage('Check Shell & Docker') {
+      steps {
+        sh '''
+          set -e
+          echo "PATH=$PATH"
+          echo -n "shell executable: "; ps -p $$ -o comm=
+          command -v docker
+          docker version
+          docker info || true
+        '''
+      }
+    }
+
     stage('CompileandRunSonarAnalysis') {
       steps {
         withCredentials([string(credentialsId: 'SONAR_TOKEN', variable: 'SONAR_TOKEN')]) {
           sh '''
+            set -e
             mvn -Dmaven.test.failure.ignore verify sonar:sonar \
               -Dsonar.token=$SONAR_TOKEN \
               -Dsonar.projectKey=easybuggy \
@@ -27,25 +43,17 @@ pipeline {
       }
     }
 
-    stage('Check Docker') {
-      steps {
-        sh '''
-          echo "PATH=$PATH"
-          command -v docker
-          docker version
-          docker info
-        '''
-      }
-    }
-
     stage('Build') {
       steps {
-        script {
-          withDockerRegistry([credentialsId: "dockerlogin", url: ""]) {
-            sh 'docker version' // sanity check
-            // Build from workspace root; DOCKER_DEFAULT_PLATFORM controls arch
-            app = docker.build("asecurityguru/testeb", ".")
-          }
+        withCredentials([usernamePassword(credentialsId: 'dockerlogin', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+          sh '''
+            set -euo pipefail
+            echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
+            docker version
+            docker build -t "$IMAGE" .
+            # docker push "$IMAGE"   # uncomment when you want to push
+            docker logout || true
+          '''
         }
       }
     }
@@ -54,9 +62,10 @@ pipeline {
       steps {
         withCredentials([string(credentialsId: 'SNYK_TOKEN', variable: 'SNYK_TOKEN')]) {
           sh '''
+            set -e
             export SNYK_TOKEN="$SNYK_TOKEN"
-            docker images | head -n 5
-            snyk container test asecurityguru/testeb || true
+            docker images | head -n 5 || true
+            snyk container test "$IMAGE" || true
           '''
         }
       }
@@ -66,6 +75,7 @@ pipeline {
       steps {
         withCredentials([string(credentialsId: 'SNYK_TOKEN', variable: 'SNYK_TOKEN')]) {
           sh '''
+            set -e
             export SNYK_TOKEN="$SNYK_TOKEN"
             mvn -B snyk:test -fn
           '''
@@ -76,6 +86,7 @@ pipeline {
     stage('RunDASTUsingZAP') {
       steps {
         sh '''
+          set -e
           "/Users/jrschavel/Documents/GitHub/Tools/ZAP_2.16.1/zap.sh" \
             -port 9393 -cmd \
             -quickurl https://www.example.com \
@@ -88,6 +99,7 @@ pipeline {
     stage('checkov') {
       steps {
         sh '''
+          set -e
           # Ensure checkov is installed (e.g., pipx install checkov)
           checkov -s -f main.tf
         '''
