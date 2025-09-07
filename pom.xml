@@ -205,7 +205,7 @@
 									tofile="${project.build.outputDirectory}/indexpage.properties" />
 								<delete
 									file="${project.build.outputDirectory}/org/t246osslab/easybuggy/core/utils/DeleteClassWhileMavenBuild.class" />
-							<target>
+							<target></target>
 						</configuration>
 					</execution>
 				</executions>
