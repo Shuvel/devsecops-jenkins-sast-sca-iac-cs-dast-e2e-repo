@@ -4,7 +4,6 @@ pipeline {
   environment {
     // Helpful on Apple Silicon when building x86 images; remove if you want native arm64
     DOCKER_DEFAULT_PLATFORM = "linux/amd64"
-    // Keep PATH clean here; we’ll append Docker paths right where we need them
   }
 
   tools {
@@ -28,13 +27,13 @@ pipeline {
 
     stage('Check Docker') {
       steps {
-        // Verify CLI + daemon before we try to login/build
-        withEnv(['PATH+DOCKER=/Applications/Docker.app/Contents/Resources/bin:/opt/homebrew/bin:/usr/local/bin']) {
+        // Ensure Jenkins sees Docker from /opt/homebrew/bin
+        withEnv(['PATH+DOCKER=/opt/homebrew/bin']) {
           sh '''
             echo "PATH=$PATH"
-            command -v docker
-            docker version
-            docker info
+            command -v docker || true
+            /opt/homebrew/bin/docker version
+            /opt/homebrew/bin/docker info
           '''
         }
       }
@@ -43,9 +42,9 @@ pipeline {
     stage('Build') {
       steps {
         script {
-          // Ensure docker is on PATH exactly where withDockerRegistry runs
-          withEnv(['PATH+DOCKER=/Applications/Docker.app/Contents/Resources/bin:/opt/homebrew/bin:/usr/local/bin']) {
-            sh 'docker version' // quick sanity check in this stage
+          // Append only /opt/homebrew/bin so the plugin finds docker
+          withEnv(['PATH+DOCKER=/opt/homebrew/bin']) {
+            sh '/opt/homebrew/bin/docker version' // quick sanity check in this stage
             withDockerRegistry([credentialsId: "dockerlogin", url: ""]) {
               // Build from workspace root; DOCKER_DEFAULT_PLATFORM controls arch
               app = docker.build("asecurityguru/testeb", ".")
@@ -57,12 +56,12 @@ pipeline {
 
     stage('RunContainerScan') {
       steps {
-        // Snyk uses the docker CLI to inspect the local image; keep docker on PATH here too
-        withEnv(['PATH+DOCKER=/Applications/Docker.app/Contents/Resources/bin:/opt/homebrew/bin:/usr/local/bin']) {
+        // Snyk uses the docker CLI to inspect the local image
+        withEnv(['PATH+DOCKER=/opt/homebrew/bin']) {
           withCredentials([string(credentialsId: 'SNYK_TOKEN', variable: 'SNYK_TOKEN')]) {
             sh '''
               export SNYK_TOKEN="$SNYK_TOKEN"
-              docker images | head -n 5
+              /opt/homebrew/bin/docker images | head -n 5
               snyk container test asecurityguru/testeb || true
             '''
           }
